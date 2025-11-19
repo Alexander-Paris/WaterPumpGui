@@ -30,6 +30,7 @@ public slots:
     void disconnectFromPort();
     void writeCommand(const QByteArray &command);
     void requestFill(double volume);
+    void requestStop();
 
 private slots:
     void onReadyRead();

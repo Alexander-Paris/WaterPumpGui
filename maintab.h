@@ -22,6 +22,7 @@ signals:
     void manualFillRequested(double volume);
     void backRequested();
     void fillRecorded(const QString &bottleName, double volume);
+    void stopRequested();
 
 public slots:
     void onTagScanned(const QString &tagID, double preFillMass);

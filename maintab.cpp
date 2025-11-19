@@ -28,12 +28,14 @@ void MainTab::onTagScanned(const QString &tagID, double preFillMass)
     m_currentBottleName = "Unknown Tag";
     QString maxVolStr = "N/A"; m_targetVolume = 0.0;
     
+    // SAVE: Save the current mass reading from the scale
     m_currentScaleMass = preFillMass; 
 
     if (m_tagsTable) {
         for (int r = 0; r < m_tagsTable->rowCount(); ++r) {
             if (m_tagsTable->item(r, 0) && QString::compare(m_tagsTable->item(r, 0)->text(), tagID, Qt::CaseInsensitive) == 0) {
                 m_currentBottleName = m_tagsTable->item(r, 1)->text();
+                // Parse as double
                 m_targetVolume = m_tagsTable->item(r, 2)->text().toDouble();
                 maxVolStr = QString::number(m_targetVolume, 'f', 2) + " mL";
                 break;
@@ -42,6 +44,7 @@ void MainTab::onTagScanned(const QString &tagID, double preFillMass)
     }
     ui->tagNameLabel->setText(m_currentBottleName);
     ui->tagVolLabel->setText(maxVolStr);
+    // Display mass with 2 decimal places
     ui->tagEmptyLabel->setText(QString::number(preFillMass, 'f', 2) + " g");
     resetStartButton();
 }
@@ -51,6 +54,7 @@ void MainTab::onTagRemoved()
     ui->manualVolumeGroup->show(); ui->numpadFrame->show(); ui->manualVolumeLineEdit->clear();
     ui->tagInfoGroup->hide(); ui->iceContainerWidget->hide(); ui->startStopButton->show(); ui->backButton->show();
     m_currentBottleName = "Manual Fill"; m_currentTagID = "";
+    // Reset the current scale reading
     m_currentScaleMass = 0.0; 
     resetStartButton();
 }
@@ -62,16 +66,20 @@ void MainTab::onNumpadClicked() {
 
 void MainTab::onStartStopClicked()
 {
-    if (m_isFilling) return;
+    if (m_isFilling) {
+        emit stopRequested();
+        setFillingState(false);
+        return;
+    }
     
-    // Get Base Volume
+    // 1. Get Base Volume
     double vol = ui->numpadFrame->isVisible() ? ui->manualVolumeLineEdit->text().toDouble() : m_targetVolume;
     if (vol <= 0) return;
 
-    // Adaptive Ice Calculation Logic
+    // 2. Adaptive Ice Calculation Logic (Only runs if a tag is scanned AND the Ice Checkbox is ticked)
     if (!m_currentTagID.isEmpty() && ui->iceCheckBox->isChecked()) {
         
-        // Get stored empty mass 
+        // a. Get stored empty mass (the known weight of the empty bottle)
         double emptyMass = 0.0;
         if (m_tagsTable) {
             for (int r = 0; r < m_tagsTable->rowCount(); ++r) {
@@ -82,28 +90,28 @@ void MainTab::onStartStopClicked()
             }
         }
         
-        // Calculate Ice Mass
+        // b. Calculate Ice Mass
         double iceMass = m_currentScaleMass - emptyMass;
         
         if (iceMass > 0.0)
         {
-            // Get Density Multiplier
+            // c. Get Density Multiplier (e.g., 0.92)
             float densityMultiplier = m_iceDensitySpinBox ? m_iceDensitySpinBox->value() / 100.0f : 0.92f;
 
-            // Calculate Fill Reduction
+            // d. Calculate Fill Reduction
             double reductionVolume = iceMass * (1.0 - densityMultiplier);
 
-            // Apply the Reduction
+            // e. Apply the Reduction
             vol = vol - reductionVolume;
         }
 
-        if (vol < 0) vol = 0; 
+        if (vol < 0) vol = 0; // Prevent negative fill volumes
     }
 
-    // Start Fill Process
+    // 3. Start Fill Process
     m_lastDispensedVolume = 0.0;
-    setFillingState(true, "FILLING...");
-    emit manualFillRequested(vol);
+    setFillingState(true, "STOP"); 
+    emit manualFillRequested(vol); // Emits double
 }
 
 void MainTab::onFillStatusReceived(const QString &status)
@@ -116,6 +124,7 @@ void MainTab::onFillStatusReceived(const QString &status)
         emit fillRecorded(m_currentBottleName, volumeToLog);
     }
     else if (status == "FP") QMessageBox::warning(this, "Status", "Fill Partial.");
+    else if (status == "FA") QMessageBox::warning(this, "Status", "Fill Stopped by User."); // Handle Abort specifically
     else QMessageBox::critical(this, "Status", "Fill ended: " + status);
     emit fillComplete();
 }
@@ -125,7 +134,9 @@ void MainTab::onWaterLevelUpdate(int p) {
 }
 void MainTab::onDispensedVolumeReceived(double v) {
     m_lastDispensedVolume = v;
-    ui->startStopButton->setText(QString::fromUtf8("STOP ✕ (%1 mL)").arg(v, 0, 'f', 2));
+    if (m_isFilling) {
+   	 ui->startStopButton->setText(QString::fromUtf8("STOP ✕ (%1 mL)").arg(v, 0, 'f', 2)); 
+	}
 }
 
 void MainTab::setFillingState(bool f, const QString &s)

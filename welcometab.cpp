@@ -22,6 +22,11 @@ WelcomeTab::~WelcomeTab()
     delete ui;
 }
 
+void WelcomeTab::updateWaterLevel(int percent)
+{
+    ui->waterLevelLabel->setText(QString("Water Level: %1%").arg(percent));
+}
+
 void WelcomeTab::onManualFillClicked()
 {
     emit manualFillRequested();

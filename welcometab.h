@@ -15,6 +15,8 @@ class WelcomeTab : public QWidget
 public:
     explicit WelcomeTab(QWidget *parent = nullptr);
     ~WelcomeTab();
+    
+    void updateWaterLevel(int percent);
 
 signals:
     void manualFillRequested();

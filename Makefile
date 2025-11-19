@@ -508,13 +508,13 @@ main.o: main.cpp mainwindow.h
 
 mainwindow.o: mainwindow.cpp mainwindow.h \
 		ui_mainwindow.h \
-		controlboardinterface.h \
-		basestationinterface.h \
 		welcometab.h \
 		maintab.h \
 		settingstab.h \
 		tagstab.h \
-		waterusagetab.h
+		waterusagetab.h \
+		controlboardinterface.h \
+		basestationinterface.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o mainwindow.o mainwindow.cpp
 
 controlboardinterface.o: controlboardinterface.cpp controlboardinterface.h

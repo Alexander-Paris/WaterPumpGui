@@ -11,21 +11,17 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QSpinBox> 
-
-// --- FIX: ALL NECESSARY TAB AND INTERFACE HEADERS ARE INCLUDED HERE ---
-#include "controlboardinterface.h" 
-#include "basestationinterface.h"
 #include "welcometab.h"
 #include "maintab.h"
 #include "settingstab.h"
 #include "tagstab.h"
 #include "waterusagetab.h"
-// ----------------------------------------------------------------------
+#include "controlboardinterface.h"
+#include "basestationinterface.h"
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-    // Instantiation now works because ControlBoardInterface is fully defined
     m_controlBoard = new ControlBoardInterface(this);
     if (!m_controlBoard->autoConnect()) {
         qWarning("CB: Auto-connect failed.");
@@ -54,29 +50,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     m_mainAppTabs->setCornerWidget(m_clockLabel, Qt::TopRightCorner);
     m_clockTimer = new QTimer(this); connect(m_clockTimer, &QTimer::timeout, this, &MainWindow::updateClock); m_clockTimer->start(1000); updateClock();
     
-    // Setup the 30-second PU timer
+    // Setup the PU timer (CHANGED FROM 30000 TO 2000)
     m_periodicUpdateTimer = new QTimer(this); 
     connect(m_periodicUpdateTimer, &QTimer::timeout, this, &MainWindow::requestPeriodicWaterLevelUpdate); 
-    m_periodicUpdateTimer->start(30000);
+    m_periodicUpdateTimer->start(2000); 
     
     // Send the first PU request immediately on launch.
     requestPeriodicWaterLevelUpdate();
 
-    // Self-healing connection timer (checks every 30 seconds)
     m_connectionTimer = new QTimer(this);
     connect(m_connectionTimer, &QTimer::timeout, this, &MainWindow::checkConnections);
     m_connectionTimer->start(30000); 
     
-    // Connect statements now work because the full class definitions are known
     connect(m_controlBoard, &ControlBoardInterface::tagPlaced, this, &MainWindow::onTagPlaced);
     connect(m_controlBoard, &ControlBoardInterface::fillStatusReceived, this, &MainWindow::onFillStatus);
     connect(m_controlBoard, &ControlBoardInterface::dispensedVolumeReceived, m_mainTab, &MainTab::onDispensedVolumeReceived);
     connect(m_baseStation, &BaseStationInterface::waterLevelUpdate, this, &MainWindow::onWaterLevelUpdate);
     connect(m_mainTab, &MainTab::manualFillRequested, m_controlBoard, &ControlBoardInterface::requestFill);
     
+    connect(m_mainTab, &MainTab::stopRequested, m_controlBoard, &ControlBoardInterface::requestStop);
+
     connect(m_mainTab, &MainTab::fillingStateChanged, this, [this](bool f){
         if(f) { m_periodicUpdateTimer->stop(); m_baseStation->requestFastUpdate(); }
-        else { m_baseStation->requestUpdateStop(); if(!m_periodicUpdateTimer->isActive()) m_periodicUpdateTimer->start(30000); }
+       
+        else { m_baseStation->requestUpdateStop(); if(!m_periodicUpdateTimer->isActive()) m_periodicUpdateTimer->start(2000); }
         onFillingStateChanged(f);
     });
     connect(m_mainTab, &MainTab::fillComplete, this, &MainWindow::switchToWelcomeScreen);
@@ -84,7 +81,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     connect(m_mainTab, &MainTab::fillRecorded, this, &MainWindow::logFill);
 
-    // Set Interface Pointers for Settings Tab
     m_settingsTab->setBaseStationInterface(m_baseStation);
     m_settingsTab->setControlBoardInterface(m_controlBoard); 
     
@@ -96,7 +92,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     QSpinBox *iceSpinBox = m_settingsTab->findChild<QSpinBox*>("iceDensitySpinBox");
     if (iceSpinBox) m_mainTab->setIceDensitySpinBox(iceSpinBox);
 
-    m_stackedWidget->setCurrentWidget(m_welcomeTab); onFillingStateChanged(false);
+    switchToMainAppTabs(); onFillingStateChanged(false);
 }
 
 MainWindow::~MainWindow() { delete ui; }
@@ -125,24 +121,26 @@ void MainWindow::requestPeriodicWaterLevelUpdate() {
 
 void MainWindow::onTagPlaced(const QString &t, double p) { if (m_tagsTab->isTagKnown(t)) { switchToMainAppTabs(); m_mainTab->onTagScanned(t, p); } else { m_stackedWidget->setCurrentWidget(m_mainAppTabs); m_mainAppTabs->setCurrentIndex(2); } }
 void MainWindow::onFillStatus(const QString &s) { m_mainTab->onFillStatusReceived(s); }
-void MainWindow::onWaterLevelUpdate(int p) { m_mainTab->onWaterLevelUpdate(p); }
+
+void MainWindow::onWaterLevelUpdate(int p) { 
+    m_mainTab->onWaterLevelUpdate(p); 
+    m_welcomeTab->updateWaterLevel(p); 
+}
+
 void MainWindow::updateClock() { m_clockLabel->setText(QDateTime::currentDateTime().toString("[HH:mm:ss]")); }
 void MainWindow::onFillingStateChanged(bool f) { bool e=!f; if(m_mainAppTabs){ if(m_settingsTab)m_settingsTab->setEnabled(e); if(m_tagsTab)m_tagsTab->setEnabled(e); } }
 void MainWindow::switchToMainAppTabs() { if(m_mainAppTabs){ m_stackedWidget->setCurrentWidget(m_mainAppTabs); m_mainAppTabs->setCurrentIndex(0); if(m_mainTab) m_mainTab->onTagRemoved(); } }
 
 void MainWindow::switchToSettingsTab() { if(m_mainAppTabs){ m_stackedWidget->setCurrentWidget(m_mainAppTabs); m_mainAppTabs->setCurrentIndex(1); } }
 
-void MainWindow::switchToWelcomeScreen() { m_baseStation->requestUpdateStop(); if(!m_periodicUpdateTimer->isActive()) m_periodicUpdateTimer->start(30000); if(m_welcomeTab) { m_stackedWidget->setCurrentWidget(m_welcomeTab); if(m_mainTab) m_mainTab->onTagRemoved(); } }
+void MainWindow::switchToWelcomeScreen() { m_baseStation->requestUpdateStop(); if(!m_periodicUpdateTimer->isActive()) m_periodicUpdateTimer->start(2000); if(m_welcomeTab) { m_stackedWidget->setCurrentWidget(m_welcomeTab); if(m_mainTab) m_mainTab->onTagRemoved(); } }
 
 void MainWindow::checkConnections()
 {
-    // Check Control Board
     if (m_controlBoard && !m_controlBoard->isOpen()) {
         qDebug() << "Connection Timer: Control Board disconnected. Retrying auto-connect...";
         m_controlBoard->autoConnect();
     }
-
-    // Check Base Station
     if (m_baseStation && !m_baseStation->isOpen()) {
         qDebug() << "Connection Timer: Base Station disconnected. Retrying auto-connect...";
         m_baseStation->autoConnect(); 

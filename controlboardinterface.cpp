@@ -68,6 +68,12 @@ void ControlBoardInterface::requestFill(double volume)
     writeCommand("F" + QString::number(volume, 'f', 2).toUtf8());
 }
 
+void ControlBoardInterface::requestStop()
+{
+    // Protocol: STOP (Abort/Stop)
+    writeCommand("STOP"); 
+}
+
 void ControlBoardInterface::onReadyRead()
 {
     m_readBuffer.append(m_serialPort->readAll());
