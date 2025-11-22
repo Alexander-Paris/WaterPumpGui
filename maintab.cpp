@@ -67,8 +67,8 @@ void MainTab::onNumpadClicked() {
 void MainTab::onStartStopClicked()
 {
     if (m_isFilling) {
-        emit stopRequested();
-        setFillingState(false);
+        emit stopRequested();   // 1. Send STOP command
+        setFillingState(false); // 2. Reset UI buttons
         return;
     }
     
@@ -76,67 +76,78 @@ void MainTab::onStartStopClicked()
     double vol = ui->numpadFrame->isVisible() ? ui->manualVolumeLineEdit->text().toDouble() : m_targetVolume;
     if (vol <= 0) return;
 
-    // 2. Adaptive Ice Calculation Logic (Only runs if a tag is scanned AND the Ice Checkbox is ticked)
+    // 2. Adaptive Ice Calculation Logic
     if (!m_currentTagID.isEmpty() && ui->iceCheckBox->isChecked()) {
         
-        // a. Get stored empty mass (the known weight of the empty bottle)
         double emptyMass = 0.0;
         if (m_tagsTable) {
             for (int r = 0; r < m_tagsTable->rowCount(); ++r) {
                 if (m_tagsTable->item(r, 0) && QString::compare(m_tagsTable->item(r, 0)->text(), m_currentTagID, Qt::CaseInsensitive) == 0) {
-                    emptyMass = m_tagsTable->item(r, 3)->text().toDouble(); // Empty Mass is in column 3
+                    emptyMass = m_tagsTable->item(r, 3)->text().toDouble(); 
                     break;
                 }
             }
         }
         
-        // b. Calculate Ice Mass
         double iceMass = m_currentScaleMass - emptyMass;
         
-        if (iceMass > 0.0)
-        {
-            // c. Get Density Multiplier (e.g., 0.92)
+        if (iceMass > 0.0) {
             float densityMultiplier = m_iceDensitySpinBox ? m_iceDensitySpinBox->value() / 100.0f : 0.92f;
-
-            // d. Calculate Fill Reduction
             double reductionVolume = iceMass * (1.0 - densityMultiplier);
-
-            // e. Apply the Reduction
             vol = vol - reductionVolume;
         }
 
-        if (vol < 0) vol = 0; // Prevent negative fill volumes
+        if (vol < 0) vol = 0; 
     }
 
     // 3. Start Fill Process
     m_lastDispensedVolume = 0.0;
     setFillingState(true, "STOP"); 
-    emit manualFillRequested(vol); // Emits double
+    emit manualFillRequested(vol); 
 }
 
 void MainTab::onFillStatusReceived(const QString &status)
 {
     if (!m_isFilling) return;
     setFillingState(false);
-    if (status == "FS") {
-        QMessageBox::information(this, "Done", "Fill successful!");
+
+    // FIX: Log the volume for Success, Partial, OR Aborted/Stopped
+    if (status == "FS" || status == "FP" || status == "FA") {
+        
+        // Use the last known dispensed volume (prefer m_lastDispensedVolume over target)
         double volumeToLog = (m_lastDispensedVolume > 0) ? m_lastDispensedVolume : m_targetVolume;
         emit fillRecorded(m_currentBottleName, volumeToLog);
+
+        // Show different messages based on the code
+        if (status == "FS") {
+            QMessageBox::information(this, "Done", "Fill successful!");
+        }
+        else if (status == "FP") {
+            QMessageBox::warning(this, "Status", "Fill Partial (Water run out?)");
+        }
+        else if (status == "FA") {
+            QMessageBox::warning(this, "Status", "Fill Stopped by User.");
+        }
     }
-    else if (status == "FP") QMessageBox::warning(this, "Status", "Fill Partial.");
-    else if (status == "FA") QMessageBox::warning(this, "Status", "Fill Stopped by User."); // Handle Abort specifically
-    else QMessageBox::critical(this, "Status", "Fill ended: " + status);
+    else {
+        // Only Fails (FF) or Errors (FE) skip logging
+        QMessageBox::critical(this, "Status", "Fill ended with error: " + status);
+    }
+    
     emit fillComplete();
 }
 
 void MainTab::onWaterLevelUpdate(int p) {
     ui->waterRemainingLabel->setText(QString::fromUtf8("➔ WATER REMAINING: %1 %").arg(p));
 }
+
 void MainTab::onDispensedVolumeReceived(double v) {
     m_lastDispensedVolume = v;
+    
+    // Race Condition Fix: Only update text if still filling
     if (m_isFilling) {
-   	 ui->startStopButton->setText(QString::fromUtf8("STOP ✕ (%1 mL)").arg(v, 0, 'f', 2)); 
-	}
+        ui->startStopButton->setText(QString::fromUtf8("STOP ✕ (%1 mL)").arg(v, 0, 'f', 2));
+    }
 }
 
 void MainTab::setFillingState(bool f, const QString &s)
